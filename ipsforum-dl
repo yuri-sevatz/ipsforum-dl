@@ -1,0 +1,224 @@
+#!/bin/env python
+import argparse
+import os
+import re
+import subprocess
+
+from cvm.controller import Browser
+from datetime import datetime
+from selenium.common.exceptions import TimeoutException
+from selenium.webdriver import Chrome, ChromeOptions, Firefox, FirefoxOptions
+from urllib.parse import urlparse
+
+import ipsforum
+
+
+def valid_datetime(s):
+    try:
+        return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        try:
+            return datetime.strptime(s, "%Y-%m-%dT%H:%M:%S%z")
+        except ValueError:
+            raise argparse.ArgumentTypeError("Not a valid date: '{}'.".format(s))
+
+
+def valid_dir(s):
+    if not os.path.isdir(s):
+        raise argparse.ArgumentTypeError("Not a valid dir: '{}'.".format(s))
+    return s
+
+
+parser = argparse.ArgumentParser(description='Download from IpsForum')
+parser.add_argument('--username', '-u', type=str, action='store', required=True)
+parser.add_argument('--password', '-p', type=str, action='store', required=True)
+parser.add_argument('--output', '-o', type=valid_dir, action='store', default=os.path.curdir)
+parser.add_argument('--begin', '-b', type=valid_datetime, action='store', default=None)
+parser.add_argument('--end', '-e', type=valid_datetime, action='store', default=None)
+parser.add_argument('--simulate', '-s', action='store_true', default=False)
+parser.add_argument('url', type=str, nargs='+', help='Download URLs')
+
+args = parser.parse_args()
+
+
+def windows_filename(filename: str):
+    return filename\
+        .replace('<', '')\
+        .replace('>', '')\
+        .replace(':', '')\
+        .replace('"', '')\
+        .replace('/', '')\
+        .replace('\\', '')\
+        .replace('|', '')\
+        .replace('?', '')\
+        .replace('*', '')
+
+
+def handle_topic(path: str):
+    print("handle_topic: {}".format(browser.url))
+    hrefs = []
+    topic = browser.load(ipsforum.TopicPage())
+    if topic.nav:
+        if topic.nav.last and topic.nav.last.displayed:
+            topic.nav.last.click()
+            topic.nav.last.unload()
+    found_range = False
+    while True:
+        topic = browser.load(ipsforum.TopicPage())
+        for comment in topic.comments:
+            if comment.date and (args.begin or args.end):
+                modified = valid_datetime(comment.date.attribute('datetime'))
+                if (args.begin and args.begin > modified) or (args.end and modified <= args.end):
+                    if found_range:
+                        break
+                    continue
+                else:
+                    found_range = True
+            for attachment in comment.attachments:
+                href = attachment.attribute('href')
+                hrefs.append(href)
+                print('Attachment: {}'.format(href))
+        else:
+            if topic.nav:
+                if topic.nav.prev and topic.nav.prev.displayed:
+                    print('Continuing Topic...')
+                    topic.nav.prev.click()
+                    topic.nav.prev.unload()
+                    continue
+        break
+    for href in hrefs:
+        if href.startswith('http://1.1.1.1/bmi/'):
+            href = 'http://' + href.split('http://1.1.1.1/bmi/', 1)[1]
+        src = urlparse(href).path
+        download = os.path.join(path, '{}'.format(os.path.basename(src)))
+        if not args.simulate and not os.path.exists(download):
+            if not os.path.exists(path):
+                os.makedirs(path)
+            print('GET {}... '.format(href), end='', flush=True)
+            try:
+                browser.save(href, download)
+            except ConnectionError:
+                continue
+            else:
+                print('Done!')
+
+
+def handle_forum(path: str):
+    print("handle_forum: {}".format(browser.url))
+    hrefs = []
+    found_range = False
+    while True:
+        forum = browser.load(ipsforum.ForumPage())
+        if not len(forum.topics):
+            break
+        for topic in forum.topics:
+            if topic.date and (args.begin or args.end):
+                modified = valid_datetime(topic.date.attribute('datetime'))
+                if (args.begin and args.begin > modified) or (args.end and modified <= args.end):
+                    if found_range:
+                        break
+                    continue
+                else:
+                    found_range = True
+            name = topic.title.text
+            href = topic.title.attribute('href')
+            hrefs.append((name, href))
+            print('Topic: {} -> {} '.format(name, href))
+        else:
+            if forum.nav:
+                if forum.nav.next and forum.nav.next.displayed:
+                    print('Continuing Forum...')
+                    forum.nav.next.click()
+                    forum.nav.next.unload()
+                    continue
+        break
+    for name, href in hrefs:
+        query = urlparse(href).query
+        directory = os.path.join(path, windows_filename(query.split("/forums/topic/", 1)[1]))
+        try:
+            browser.url = href
+        except TimeoutException as e:
+            print(e)
+        else:
+            handle_topic(directory)
+
+
+def handle_index(path: str):
+    print("handle_index: {}".format(browser.url))
+    hrefs = []
+    index = browser.load(ipsforum.IndexPage())
+    for forum in index.forums:
+        if forum.date and (args.begin or args.end):
+            modified = valid_datetime(forum.date.attribute('datetime'))
+            if (args.begin and args.begin > modified) or (args.end and modified <= args.end):
+                continue
+        name = forum.title.text
+        href = forum.title.attribute('href')
+        hrefs.append((name, href))
+        print('Forum: {} -> {} '.format(name, href))
+    for name, href in hrefs:
+        query = urlparse(href).query
+        directory = os.path.join(path, windows_filename(query.split("/forums/forum/", 1)[1]))
+        try:
+            browser.url = href
+        except TimeoutException as e:
+            print(e)
+        else:
+            handle_forum(directory)
+
+
+def handle_login(path: str):
+    print("handle_login: {}".format(browser.url))
+    login = browser.load(ipsforum.LoginPage())
+    login.username.input(args.username)
+    login.password.input(args.password)
+    login.submit.click()
+    login.submit.unload()
+
+
+def chrome():
+    options = ChromeOptions()
+    p = subprocess.Popen(
+        ['chromium', '--version'],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    version, error = p.communicate()
+    number = str(version).split(' ')[1]
+    print(number)
+    agent = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{number} Safari/537.36'.format(number=number)
+    options.add_argument('--headless')
+    options.add_argument('--window-size=1920,1080')
+    options.add_argument("--user-agent={}".format(agent))
+    prefs = {
+        "profile.managed_default_content_settings.images": 2,
+        "profile.managed_default_content_settings.javascript": 2,
+        "profile.managed_default_content_settings.css": 2,
+    }
+    options.add_experimental_option("prefs", prefs)
+    driver = Chrome(chrome_options=options)
+    #driver.set_page_load_timeout(300)
+    return driver
+
+
+browser = Browser(chrome())
+
+rpaths = [
+    (r"/index\.php\?/login/$", handle_login),
+    (r"/index\.php\?/forums/$", handle_index),
+    (r"/index\.php\?/forums/forum/", handle_forum),
+    (r"/index\.php\?/forums/topic/", handle_topic),
+]
+
+try:
+    for url in args.url:
+        for pattern, func in rpaths:
+            if re.search(pattern, url):
+                browser.url = url
+                func(args.output)
+                break
+        else:
+            raise ValueError("Url path must match one of {}".format(str([pattern for pattern, func in rpaths])))
+finally:
+    browser.quit()
