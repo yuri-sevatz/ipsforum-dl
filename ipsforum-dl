@@ -10,7 +10,7 @@ from selenium.common.exceptions import TimeoutException
 from selenium.webdriver import Chrome, ChromeOptions, Firefox, FirefoxOptions
 from urllib.parse import urlparse
 
-import ipsforum
+import ipsforum_dl
 
 
 def valid_datetime(s):
