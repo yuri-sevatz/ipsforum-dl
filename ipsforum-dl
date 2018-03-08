@@ -57,14 +57,14 @@ def windows_filename(filename: str):
 def handle_topic(path: str):
     print("handle_topic: {}".format(browser.url))
     hrefs = []
-    topic = browser.load(ipsforum.TopicPage())
+    topic = browser.load(ipsforum_dl.TopicPage())
     if topic.nav:
         if topic.nav.last and topic.nav.last.displayed:
             topic.nav.last.click()
             topic.nav.last.unload()
     found_range = False
     while True:
-        topic = browser.load(ipsforum.TopicPage())
+        topic = browser.load(ipsforum_dl.TopicPage())
         for comment in topic.comments:
             if comment.date and (args.begin or args.end):
                 modified = valid_datetime(comment.date.attribute('datetime'))
@@ -108,7 +108,7 @@ def handle_forum(path: str):
     hrefs = []
     found_range = False
     while True:
-        forum = browser.load(ipsforum.ForumPage())
+        forum = browser.load(ipsforum_dl.ForumPage())
         if not len(forum.topics):
             break
         for topic in forum.topics:
@@ -146,7 +146,7 @@ def handle_forum(path: str):
 def handle_index(path: str):
     print("handle_index: {}".format(browser.url))
     hrefs = []
-    index = browser.load(ipsforum.IndexPage())
+    index = browser.load(ipsforum_dl.IndexPage())
     for forum in index.forums:
         if forum.date and (args.begin or args.end):
             modified = valid_datetime(forum.date.attribute('datetime'))
@@ -169,7 +169,7 @@ def handle_index(path: str):
 
 def handle_login(path: str):
     print("handle_login: {}".format(browser.url))
-    login = browser.load(ipsforum.LoginPage())
+    login = browser.load(ipsforum_dl.LoginPage())
     login.username.input(args.username)
     login.password.input(args.password)
     login.submit.click()
