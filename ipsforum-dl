@@ -6,16 +6,20 @@ import subprocess
 
 from cvm.controller import Browser
 from datetime import datetime
+from dateutil import tz
 from selenium.common.exceptions import TimeoutException
-from selenium.webdriver import Chrome, ChromeOptions, Firefox, FirefoxOptions
+from selenium.webdriver import Chrome, ChromeOptions
 from urllib.parse import urlparse
 
 import ipsforum_dl
 
 
+process_begin = datetime.now(tz=tz.tzlocal())
+
+
 def valid_datetime(s):
     try:
-        return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ")
+        return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=tz.tzutc())
     except ValueError:
         try:
             return datetime.strptime(s, "%Y-%m-%dT%H:%M:%S%z")
@@ -29,16 +33,99 @@ def valid_dir(s):
     return s
 
 
-parser = argparse.ArgumentParser(description='Download from IpsForum')
-parser.add_argument('--username', '-u', type=str, action='store', required=True)
-parser.add_argument('--password', '-p', type=str, action='store', required=True)
-parser.add_argument('--output', '-o', type=valid_dir, action='store', default=os.path.curdir)
-parser.add_argument('--begin', '-b', type=valid_datetime, action='store', default=None)
-parser.add_argument('--end', '-e', type=valid_datetime, action='store', default=None)
-parser.add_argument('--simulate', '-s', action='store_true', default=False)
-parser.add_argument('url', type=str, nargs='+', help='Download URLs')
+parser = argparse.ArgumentParser(description='IpsForum Downloader')
+parser.add_argument(
+    '--username', '-u', type=str, action='store', required=True,
+    help="username to supply to remote server if logging in"
+)
+parser.add_argument(
+    '--password', '-p', type=str, action='store', required=True,
+    help="password to supply to remote server if logging in"
+)
+parser.add_argument(
+    '--output', '-o', type=valid_dir, action='store', default=os.path.curdir,
+    help="output directory"
+)
+parser.add_argument(
+    '--reverse', '-r', action='store_true', default=False,
+    help="archive older topics first"
+)
+parser.add_argument(
+    '--incremental', '-i', action='store_true', default=False,
+    help="save/load progress in <output>/timestamp.chk"
+)
+parser.add_argument(
+    '--full', '-f', action='store_true', default=False,
+    help="restart progress in <output>/timestamp.chk"
+)
+parser.add_argument(
+    '--checkpoint', '-c', type=valid_datetime, action='store', default=None,
+    help="override progress on start with date/time (e.g. {checkpoint})".format(
+        checkpoint=process_begin.strftime("%Y-%m-%dT%H:%M:%S%z")
+    )
+)
+parser.add_argument(
+    '--begin', '-b', type=valid_datetime, action='store', default=None,
+    help="begin post date/time range (e.g. {begin})".format(
+        begin=process_begin.strftime("%Y-%m-%dT%H:%M:%S%z")
+    )
+)
+parser.add_argument(
+    '--end', '-e', type=valid_datetime, action='store', default=None,
+    help="end post date/time range (e.g. {end})".format(
+        end=process_begin.strftime("%Y-%m-%dT%H:%M:%S%z")
+    )
+)
+parser.add_argument(
+    '--simulate', '-s', action='store_true', default=False,
+    help="simulate execution without writing to disk"
+)
+parser.add_argument(
+    'url', type=str, nargs='+',
+    help="sequence of urls to access, of format: {}".format(str([
+        "<ips_root>/index.php?/login/",
+        "<ips_root>/index.php?/forums/",
+        "<ips_root>/index.php?/forums/forum/<forum_id>",
+        "<ips_root>/index.php?/forums/topic/<topic_id>",
+    ]))
+)
 
 args = parser.parse_args()
+
+begin = args.begin
+end = args.end
+
+checkpoint = None
+checkpoint_path = os.path.join(args.output, 'timestamp.chk')
+
+if not args.full and (args.incremental or args.checkpoint):
+    try:
+        checkpoint = args.checkpoint if args.checkpoint else datetime.fromtimestamp(os.stat(checkpoint_path).st_mtime)
+        if begin and not begin <= checkpoint:
+            raise ValueError(
+                (
+                    "Checkpoint not in range [begin, end]: "
+                    "requires -b [--begin] {begin} <= -c [--checkpoint] {checkpoint}"
+                ).format(begin=begin, checkpoint=checkpoint)
+            )
+        if end and not checkpoint <= end:
+            raise ValueError(
+                (
+                    "Checkpoint not in range [begin, end]: "
+                    "requires -c [--checkpoint] {checkpoint} <= -e [--end] {end}"
+                ).format(checkpoint=checkpoint, end=end)
+            )
+        begin = checkpoint if not begin else max(begin, checkpoint)
+    except FileNotFoundError:
+        pass
+else:
+    if begin and end and not begin <= end:
+        raise ValueError(
+            (
+                "Cannot define range [begin, end]: "
+                "requires -b [--begin] {begin} <= -e [--end] {end}"
+            ).format(begin=args.begin, end=args.end)
+        )
 
 
 def windows_filename(filename: str):
@@ -57,18 +144,20 @@ def windows_filename(filename: str):
 def handle_topic(path: str):
     print("handle_topic: {}".format(browser.url))
     hrefs = []
-    topic = browser.load(ipsforum_dl.TopicPage())
-    if topic.nav:
-        if topic.nav.last and topic.nav.last.displayed:
-            topic.nav.last.click()
-            topic.nav.last.unload()
+    if not args.reverse:
+        topic = browser.load(ipsforum_dl.TopicPage())
+        if topic.nav:
+            if topic.nav.last and topic.nav.last.displayed:
+                print('Topic >>')
+                topic.nav.last.click()
+                topic.nav.last.unload()
     found_range = False
     while True:
         topic = browser.load(ipsforum_dl.TopicPage())
         for comment in topic.comments:
-            if comment.date and (args.begin or args.end):
+            if comment.date and (begin or end):
                 modified = valid_datetime(comment.date.attribute('datetime'))
-                if (args.begin and args.begin > modified) or (args.end and modified <= args.end):
+                if (begin and begin > modified) or (end and modified < end):
                     if found_range:
                         break
                     continue
@@ -80,11 +169,18 @@ def handle_topic(path: str):
                 print('Attachment: {}'.format(href))
         else:
             if topic.nav:
-                if topic.nav.prev and topic.nav.prev.displayed:
-                    print('Continuing Topic...')
-                    topic.nav.prev.click()
-                    topic.nav.prev.unload()
-                    continue
+                if not args.reverse:
+                    if topic.nav.prev and topic.nav.prev.displayed:
+                        print('Topic <')
+                        topic.nav.prev.click()
+                        topic.nav.prev.unload()
+                        continue
+                else:
+                    if topic.nav.next and topic.nav.next.displayed:
+                        print('Topic >')
+                        topic.nav.next.click()
+                        topic.nav.next.unload()
+                        continue
         break
     for href in hrefs:
         if href.startswith('http://1.1.1.1/bmi/'):
@@ -97,7 +193,8 @@ def handle_topic(path: str):
             print('GET {}... '.format(href), end='', flush=True)
             try:
                 browser.save(href, download)
-            except ConnectionError:
+            except ConnectionError as e:
+                print("Error: {}".format(e))
                 continue
             else:
                 print('Done!')
@@ -106,15 +203,22 @@ def handle_topic(path: str):
 def handle_forum(path: str):
     print("handle_forum: {}".format(browser.url))
     hrefs = []
+    if args.reverse:
+        forum = browser.load(ipsforum_dl.ForumPage())
+        if forum.nav:
+            if forum.nav.last and forum.nav.last.displayed:
+                print('Forum >>')
+                forum.nav.last.click()
+                forum.nav.last.unload()
     found_range = False
     while True:
         forum = browser.load(ipsforum_dl.ForumPage())
         if not len(forum.topics):
             break
         for topic in forum.topics:
-            if topic.date and (args.begin or args.end):
+            if topic.date and (begin or end):
                 modified = valid_datetime(topic.date.attribute('datetime'))
-                if (args.begin and args.begin > modified) or (args.end and modified <= args.end):
+                if (begin and begin > modified) or (end and modified < end):
                     if found_range:
                         break
                     continue
@@ -126,11 +230,18 @@ def handle_forum(path: str):
             print('Topic: {} -> {} '.format(name, href))
         else:
             if forum.nav:
-                if forum.nav.next and forum.nav.next.displayed:
-                    print('Continuing Forum...')
-                    forum.nav.next.click()
-                    forum.nav.next.unload()
-                    continue
+                if args.reverse:
+                    if forum.nav.prev and forum.nav.prev.displayed:
+                        print('Forum <')
+                        forum.nav.prev.click()
+                        forum.nav.prev.unload()
+                        continue
+                else:
+                    if forum.nav.next and forum.nav.next.displayed:
+                        print('Forum >')
+                        forum.nav.next.click()
+                        forum.nav.next.unload()
+                        continue
         break
     for name, href in hrefs:
         query = urlparse(href).query
@@ -148,9 +259,9 @@ def handle_index(path: str):
     hrefs = []
     index = browser.load(ipsforum_dl.IndexPage())
     for forum in index.forums:
-        if forum.date and (args.begin or args.end):
+        if forum.date and (begin or end):
             modified = valid_datetime(forum.date.attribute('datetime'))
-            if (args.begin and args.begin > modified) or (args.end and modified <= args.end):
+            if (begin and begin > modified) or (end and modified < end):
                 continue
         name = forum.title.text
         href = forum.title.attribute('href')
@@ -186,7 +297,6 @@ def chrome():
     )
     version, error = p.communicate()
     number = str(version).split(' ')[1]
-    print(number)
     agent = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{number} Safari/537.36'.format(number=number)
     options.add_argument('--headless')
     options.add_argument('--window-size=1920,1080')
@@ -198,7 +308,6 @@ def chrome():
     }
     options.add_experimental_option("prefs", prefs)
     driver = Chrome(chrome_options=options)
-    #driver.set_page_load_timeout(300)
     return driver
 
 
@@ -220,5 +329,9 @@ try:
                 break
         else:
             raise ValueError("Url path must match one of {}".format(str([pattern for pattern, func in rpaths])))
+    process_end = process_begin if not end else min(end, process_begin)
+    if not args.simulate and (args.full or args.incremental):
+        with open(checkpoint_path, 'a'):
+            os.utime(checkpoint_path, (process_end.timestamp(), process_end.timestamp()))
 finally:
     browser.quit()
