@@ -149,6 +149,7 @@ def handle_topic(path: str):
         if topic.nav:
             if topic.nav.last and topic.nav.last.displayed:
                 print('Topic >>')
+                browser.scroll_element(topic.nav.last)
                 topic.nav.last.click()
                 topic.nav.last.unload()
     found_range = False
@@ -172,12 +173,14 @@ def handle_topic(path: str):
                 if not args.reverse:
                     if topic.nav.prev and topic.nav.prev.displayed:
                         print('Topic <')
+                        browser.scroll_element(topic.nav.prev)
                         topic.nav.prev.click()
                         topic.nav.prev.unload()
                         continue
                 else:
                     if topic.nav.next and topic.nav.next.displayed:
                         print('Topic >')
+                        browser.scroll_element(topic.nav.next)
                         topic.nav.next.click()
                         topic.nav.next.unload()
                         continue
@@ -208,6 +211,7 @@ def handle_forum(path: str):
         if forum.nav:
             if forum.nav.last and forum.nav.last.displayed:
                 print('Forum >>')
+                browser.scroll_element(forum.nav.last)
                 forum.nav.last.click()
                 forum.nav.last.unload()
     found_range = False
@@ -233,12 +237,14 @@ def handle_forum(path: str):
                 if args.reverse:
                     if forum.nav.prev and forum.nav.prev.displayed:
                         print('Forum <')
+                        browser.scroll_element(forum.nav.prev)
                         forum.nav.prev.click()
                         forum.nav.prev.unload()
                         continue
                 else:
                     if forum.nav.next and forum.nav.next.displayed:
                         print('Forum >')
+                        browser.scroll_element(forum.nav.next)
                         forum.nav.next.click()
                         forum.nav.next.unload()
                         continue
