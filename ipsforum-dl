@@ -100,7 +100,7 @@ checkpoint_path = os.path.join(args.output, 'timestamp.chk')
 
 if not args.full and (args.incremental or args.checkpoint):
     try:
-        checkpoint = args.checkpoint if args.checkpoint else datetime.fromtimestamp(os.stat(checkpoint_path).st_mtime)
+        checkpoint = args.checkpoint if args.checkpoint else datetime.fromtimestamp(os.stat(checkpoint_path).st_mtime).replace(tzinfo=tz.tzutc())
         if begin and not begin <= checkpoint:
             raise ValueError(
                 (
