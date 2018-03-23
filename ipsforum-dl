@@ -96,7 +96,7 @@ begin = args.begin
 end = args.end
 
 checkpoint = None
-checkpoint_path = os.path.join(args.output, 'timestamp.chk')
+checkpoint_path = os.path.join(args.output, '.timestamp.chk')
 
 if not args.full and (args.incremental or args.checkpoint):
     try:
