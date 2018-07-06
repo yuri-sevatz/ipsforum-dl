@@ -5,8 +5,8 @@ from cvm.view import Field, View, Page, Group
 
 class LoginPage(Page):
     def __init__(self):
-        self.username = Field(Selector.ID, "elInput_auth")
-        self.password = Field(Selector.ID, "elInput_password")
+        self.username = Field(Selector.ID, "auth")
+        self.password = Field(Selector.ID, "password")
         self.submit = Field(Selector.CSS, "button[type=submit]")
 
 
