@@ -228,10 +228,11 @@ def handle_forum(path: str):
                     continue
                 else:
                     found_range = True
-            name = topic.title.text
-            href = topic.title.attribute('href')
-            hrefs.append((name, href))
-            print('Topic: {} -> {} '.format(name, href))
+            if topic.title:
+                name = topic.title.text
+                href = topic.title.attribute('href')
+                hrefs.append((name, href))
+                print('Topic: {} -> {} '.format(name, href))
         else:
             if forum.nav:
                 if args.reverse:
