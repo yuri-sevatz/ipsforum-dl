@@ -313,13 +313,8 @@ def chrome():
     options.add_argument("--user-agent={}".format(agent))
     if args.tunnel:
         options.add_argument("--proxy-server={}".format(args.tunnel))
-    prefs = {
-        "profile.managed_default_content_settings.images": 2,
-        "profile.managed_default_content_settings.javascript": 2,
-        "profile.managed_default_content_settings.css": 2,
-    }
-    options.add_experimental_option("prefs", prefs)
     driver = Chrome(chrome_options=options)
+    driver.set_page_load_timeout(300)
     return driver
 
 
