@@ -163,7 +163,7 @@ def handle_topic(path: str):
     found_range = False
     while True:
         topic = browser.load(ipsforum_dl.TopicPage())
-        for comment in (topic.comments if not args.reversed else reversed(topic.comments)):
+        for comment in (topic.comments if not args.reverse else reversed(topic.comments)):
             if comment.date and (begin or end):
                 modified = valid_datetime(comment.date.attribute('datetime'))
                 if (begin and begin > modified) or (end and modified < end):
