@@ -153,7 +153,7 @@ def windows_filename(filename: str):
 def handle_topic(path: str):
     print("handle_topic: {}".format(browser.url))
     hrefs = []
-    if not args.reverse:
+    if args.reverse:
         topic = browser.load(ipsforum_dl.TopicPage())
         if topic.nav:
             if topic.nav.last and topic.nav.last.displayed:
@@ -163,7 +163,7 @@ def handle_topic(path: str):
     found_range = False
     while True:
         topic = browser.load(ipsforum_dl.TopicPage())
-        for comment in topic.comments:
+        for comment in (topic.comments if not args.reversed else reversed(topic.comments)):
             if comment.date and (begin or end):
                 modified = valid_datetime(comment.date.attribute('datetime'))
                 if (begin and begin > modified) or (end and modified < end):
@@ -178,7 +178,7 @@ def handle_topic(path: str):
                 print('Attachment: {}'.format(href))
         else:
             if topic.nav:
-                if not args.reverse:
+                if args.reverse:
                     if topic.nav.prev and topic.nav.prev.displayed:
                         print('Topic <')
                         topic.nav.prev.click()
@@ -212,7 +212,7 @@ def handle_topic(path: str):
 def handle_forum(path: str):
     print("handle_forum: {}".format(browser.url))
     hrefs = []
-    if args.reverse:
+    if not args.reverse:
         forum = browser.load(ipsforum_dl.ForumPage())
         if forum.nav:
             if forum.nav.last and forum.nav.last.displayed:
@@ -224,7 +224,7 @@ def handle_forum(path: str):
         forum = browser.load(ipsforum_dl.ForumPage())
         if not len(forum.topics):
             break
-        for topic in forum.topics:
+        for topic in (forum.topics if args.reverse else reversed(forum.topics)):
             if topic.date and (begin or end):
                 modified = valid_datetime(topic.date.attribute('datetime'))
                 if (begin and begin > modified) or (end and modified < end):
@@ -241,17 +241,18 @@ def handle_forum(path: str):
         else:
             if forum.nav:
                 if args.reverse:
-                    if forum.nav.prev and forum.nav.prev.displayed:
-                        print('Forum <')
-                        forum.nav.prev.click()
-                        forum.nav.prev.unload()
-                        continue
-                else:
                     if forum.nav.next and forum.nav.next.displayed:
                         print('Forum >')
                         forum.nav.next.click()
                         forum.nav.next.unload()
                         continue
+                else:
+                    if forum.nav.prev and forum.nav.prev.displayed:
+                        print('Forum <')
+                        forum.nav.prev.click()
+                        forum.nav.prev.unload()
+                        continue
+
         break
     for name, href in hrefs:
         query = urlparse(href).query
